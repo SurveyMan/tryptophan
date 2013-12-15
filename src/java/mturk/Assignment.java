@@ -1,6 +1,6 @@
 package mturk;
 
-//import mturk.core;
+import mturk.core;
 import java.util.Date;
 
 public class Assignment {
