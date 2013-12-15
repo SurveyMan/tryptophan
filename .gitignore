@@ -1,3 +1,4 @@
 .lein*
 lib/*
 *~
+target/*
