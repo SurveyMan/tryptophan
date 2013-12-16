@@ -4,7 +4,7 @@
             [clojure.data.xml :as xml]
             [mturk.response :as response]
              )
-  (:import [java.util Date SimpleTimeZone UUID]
+  (:import [java.util Date SimpleTimeZone UUID Currency]
            [java.text SimpleDateFormat]
            [java.io StringReader]
            [javax.crypto Mac]
@@ -55,23 +55,22 @@
   "Basic body of a mechanical turk request. Returns false if secretKey or accessKey are not set. Returns the XML of a response request, which may be an error or response data."
   ([op] (request op {}))
   ([op args]
-     (and (not (nil? @accessKey))
-          (not (nil? @secretKey))
-          (let [timestamp (UTCDateString)
-                msg (str service op timestamp)
-                signK (SecretKeySpec. (.getBytes @secretKey) shaAlgo)
-               raw (-> (doto (Mac/getInstance shaAlgo) (.init signK))
-                       (.doFinal (.getBytes msg)))
-                sig (-> (Base64/encodeBase64 raw) (String. "UTF-8"))
-                http-args (merge args
-                                 {:Service service
-                                  :AWSAccessKeyId @accessKey
-                                  :Version version
-                                  :Operation op
-                                  :Signature sig
-                                  :Timestamp timestamp})]
-            (print http-args)
-            (client/get "https://mechanicalturk.amazonaws.com/?" {:query-params http-args})))))
+     (when (and @accessKey @secretKey)
+       (let [timestamp (UTCDateString)
+             msg (str service op timestamp)
+             signK (SecretKeySpec. (.getBytes @secretKey) shaAlgo)
+             raw (-> (doto (Mac/getInstance shaAlgo) (.init signK))
+                     (.doFinal (.getBytes msg)))
+             sig (-> (Base64/encodeBase64 raw) (String. "UTF-8"))
+             http-args (merge args
+                              {:Service service
+                               :AWSAccessKeyId @accessKey
+                               :Version version
+                               :Operation op
+                               :Signature sig
+                               :Timestamp timestamp})]
+         (print http-args)
+         (client/get "https://mechanicalturk.amazonaws.com/?" {:query-params http-args})))))
 
 ;; possible errors
 ;; java exceptions 
@@ -81,6 +80,11 @@
 ;; - AWS.BadClaimsSupplied -- retry this (looks like this mostly happens in python when the times are off)
 ;; - AWS.ServiceUnavailable -- retry, but use unique token for CreateHIT, GrantBonus, and ExtendHIT
 
+(defn log-response
+  "Logs the response of a call in a lightweight database"
+  [response]
+  nil
+)
 
 (defn poll 
   "Wrapper for the request function that issues requests until we get a legit error or results"
@@ -90,14 +94,28 @@
        (loop [time 2]
          (let [resp-map (request op (merge args (if id {:UniqueRequestToken id})))
                resp-type (response/make-response-type resp-map)]
+           (print resp-map)
            (if-let [err (response/isError (:body resp-map))]
              (if (contains? response/retry-error-codes err)
                (if (< time maxTimeOut)
                  (recur (* time 2))
                  (throw (Exception. (str "Exceeded max timeout of " maxTimeOut))))
                (throw (Exception. err)))
-             resp-type))))))
-       
+             (do (log-response resp-type)
+                 resp-type)))))))
 
-;; ;; 
-(defn getAssignment [aid] {})
+;; actual mturk calls, to be used in java wrapper
+
+(defn getBalance []
+  "Returns a map of the current amount of money left in the account."
+  (let [balance (poll 'GetAccountBalance)
+        raw-data (-> (.response-content balance)
+                     (#(second (:content %)))
+                     (#(second (:content %)))
+                     (:content))]
+    (into {} (map (fn [{tag :tag, content :content}] [tag (first content)]) raw-data)))
+
+      
+
+;; (defn getAssignment [aid] 
+;;   (let [assignment (poll 'GetAssignment aid)]
