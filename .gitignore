@@ -3,3 +3,6 @@ lib/*
 *~
 target/*
 .nrepl-port
+.credentials
+src/tryptophan.iml
+src/main/clojure/mturk/#.*

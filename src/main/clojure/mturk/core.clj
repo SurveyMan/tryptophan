@@ -13,7 +13,9 @@
            )
   (:gen-class
    :name mturk.core
-   :methods [ [getAssignment [java.lang.String] java.util.Map]
+   :methods [
+              [getBalance [] java.util.Map]
+              [getAssignment [java.lang.String] java.util.Map]
              ]
   )
 )
@@ -28,7 +30,19 @@
 (def ^{:private true} timeFormat "yyyy-MM-dd'T'HH:mm:ss'Z'")
 (def ^{:private true} shaAlgo "HmacSHA1")
 (def ^{:private true} version "2012-03-25")
-(def supported-operations '(ApproveAssignment))
+
+;; get balance stuff
+(defrecord Balance [Amount CurrencyCode FormattedPrice])
+
+(defn make-balance
+  [{amount :Amount cc :CurrencyCode fp :FormattedPrice}]
+  (Balance. amount cc fp)
+  )
+
+(def get-account-balance 'GetAccountBalance)
+
+;; all supported ops
+(def supported-operations (list get-account-balance))
 
 (defn ^{:private true} uuid 
   "Generates a uuid to be used for non-idempotent requests to mturk"
@@ -58,7 +72,7 @@
      (when (and @accessKey @secretKey)
        (let [timestamp (UTCDateString)
              msg (str service op timestamp)
-             signK (SecretKeySpec. (.getBytes @secretKey) shaAlgo)
+             signK (SecretKeySpec. (.getBytes (str @secretKey)) shaAlgo)
              raw (-> (doto (Mac/getInstance shaAlgo) (.init signK))
                      (.doFinal (.getBytes msg)))
              sig (-> (Base64/encodeBase64 raw) (String. "UTF-8"))
@@ -90,7 +104,9 @@
   "Wrapper for the request function that issues requests until we get a legit error or results"
   ([op] (poll op {}))
   ([op args]
-     (let [id (uuid op)]
+    (assert (not (nil? @secretKey)))
+    (assert (not (nil? @accessKey)))
+    (let [id (uuid op)]
        (loop [time 2]
          (let [resp-map (request op (merge args (if id {:UniqueRequestToken id})))
                resp-type (response/make-response-type resp-map)]
@@ -108,12 +124,15 @@
 
 (defn getBalance []
   "Returns a map of the current amount of money left in the account."
-  (let [balance (poll 'GetAccountBalance)
+  (let [balance (poll get-account-balance)
         raw-data (-> (.response-content balance)
                      (#(second (:content %)))
                      (#(second (:content %)))
                      (:content))]
-    (into {} (map (fn [{tag :tag, content :content}] [tag (first content)]) raw-data)))
+    (make-balance (into {} (map (fn [{tag :tag, content :content}] [tag (first content)]) raw-data)))
+    )
+  )
+
 
       
 
